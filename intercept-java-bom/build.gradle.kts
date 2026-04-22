@@ -5,10 +5,10 @@ plugins {
 
 dependencies {
     constraints {
-        // Use the project's own version for internal modules
         api(project(":intercept-java-core"))
-
-        // Third party versions
-        api("com.fasterxml.jackson.core:jackson-databind:2.16.1")
+        api("tools.jackson.core:jackson-databind:3.1.2")
+        api("org.junit.jupiter:junit-jupiter:5.10.1")
+        api("org.junit.platform:junit-platform-launcher:1.10.1")
+        api("jakarta.annotation:jakarta.annotation-api:3.0.0")
     }
 }

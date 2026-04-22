@@ -5,6 +5,10 @@ plugins {
 dependencies {
 
     implementation(platform(project(":intercept-java-bom")))
-    implementation("com.fasterxml.jackson.core:jackson-databind")
+    implementation("jakarta.annotation:jakarta.annotation-api")
+    implementation("tools.jackson.core:jackson-databind")
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.10.1")
+
     
 }
