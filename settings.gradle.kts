@@ -1,4 +1,4 @@
-rootProject.name = "intercept-java"
+rootProject.name = "interceptJ"
 
-include("intercept-java-core")
-include("intercept-java-bom")
+include("interceptJ-core")
+include("interceptJ-bom")

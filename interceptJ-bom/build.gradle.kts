@@ -5,7 +5,7 @@ plugins {
 
 dependencies {
     constraints {
-        api(project(":intercept-java-core"))
+        api(project(":interceptJ-core"))
         api("tools.jackson.core:jackson-databind:3.1.2")
         api("org.junit.jupiter:junit-jupiter:5.10.1")
         api("org.junit.platform:junit-platform-launcher:1.10.1")
