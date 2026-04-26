@@ -1,5 +1,6 @@
 plugins {
     id("unconquerable.base-conventions")
+    id("unconquerable.publish-conventions")
     `java-platform`
 }
 

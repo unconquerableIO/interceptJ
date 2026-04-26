@@ -30,6 +30,7 @@ Thumbs.db
 # --- Local Environment ---
 # Keep your local credentials and secrets private
 gradle.properties.local
+gradle.properties
 .env
 
 # --- Claude Code ---

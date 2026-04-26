@@ -1,5 +1,6 @@
 plugins {
     id("unconquerable.java-conventions")
+    id("unconquerable.publish-conventions")
 }
 
 dependencies {
