@@ -1,6 +1,9 @@
 # interceptJ
 
-> State-of-the-art fraud detection for the JVM.
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Java](https://img.shields.io/badge/Java-25-orange.svg?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/25/)
+
+> Fraud detection using Java .
 
 `interceptJ` is a composable, type-safe fraud detection library that lets you plug in any number of risk signals — IP reputation, device fingerprints, velocity checks, ML scores — and reduce them to a single, actionable verdict in a clean, fluent pipeline.
 
