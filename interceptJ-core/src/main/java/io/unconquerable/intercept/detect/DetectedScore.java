@@ -35,7 +35,7 @@ import java.math.BigDecimal;
  * }
  * }</pre>
  *
- * @param <T>          the type of the target value that was analysed
+ * @param <T>          the type of the target value that was analyzed
  * @param detectorName the name of the {@link Detector} that produced this result; must not be
  *                     {@code null}
  * @param target       the value that was submitted to the detector for analysis; must not be
