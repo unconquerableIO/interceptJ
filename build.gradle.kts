@@ -6,7 +6,7 @@ plugins {
 scmVersion {
     tag {
         prefix.set("v")
-        initialVersion(pl.allegro.tech.build.axion.release.domain.hooks.HooksConfig.VERSION_FROM_TAG, "0.0.2")
+        initialVersion { _, _ -> "0.0.1" }
     }
     nextVersion {
         suffix.set("SNAPSHOT")
