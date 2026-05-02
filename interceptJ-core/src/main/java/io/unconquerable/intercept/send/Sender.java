@@ -2,10 +2,13 @@ package io.unconquerable.intercept.send;
 
 import io.unconquerable.intercept.decide.Decided;
 import io.unconquerable.intercept.detect.Detected;
+import io.unconquerable.intercept.instrument.InstrumentIdentifier;
+import io.unconquerable.intercept.instrument.InstrumentType;
 import jakarta.annotation.Nonnull;
 import jakarta.annotation.Nullable;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Strategy interface for dispatching the complete outcome of an interceptJ pipeline execution.
@@ -18,10 +21,12 @@ import java.util.List;
  * <p>Because {@code Sender} is a {@link FunctionalInterface} it can be supplied as a lambda:
  *
  * <pre>{@code
- * Sender<ApiResponse> auditSender = (result, decided, detections) -> {
+ * Sender<ApiResponse> auditSender = (result, decided, detections, identifier, metadata) -> {
  *     auditLog.record(AuditEntry.builder()
  *         .verdict(decided.type())
  *         .detections(detections)
+ *         .accountId(identifier != null ? identifier.accountId() : null)
+ *         .metadata(metadata)
  *         .response(result)
  *         .build());
  * };
@@ -65,8 +70,15 @@ public interface Sender<R> {
      * @param detections the complete, ordered list of {@link Detected} results from all registered
      *                   detectors, including any that were skipped by a
      *                   {@link io.unconquerable.intercept.detect.ConditionalDetector}; never {@code null}
+     * @param identifier the {@link InstrumentIdentifier} that scopes the pipeline execution to a
+     *                   specific tenant, user, and instrument; {@code null} when no identifier was
+     *                   provided to the pipeline
+     * @param metadata   arbitrary key-value pairs supplied by the caller for enrichment or routing
+     *                   (e.g. request headers, trace IDs); {@code null} when not provided
      */
     void send(@Nullable R result,
               @Nonnull Decided decided,
-              @Nonnull List<Detected<?>> detections);
+              @Nonnull List<Detected<?>> detections,
+              @Nullable InstrumentIdentifier<? extends InstrumentType> identifier,
+              @Nullable Map<String, Object> metadata);
 }

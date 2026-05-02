@@ -34,6 +34,7 @@ Optional<Response> response = Interceptor.interceptor()
   - [Running the Pipeline](#running-the-pipeline)
   - [Conditional Detectors](#conditional-detectors)
   - [Decision Detail](#decision-detail)
+  - [Instrument Types](#instrument-types)
   - [Forwarding Pipeline Results (Sender)](#forwarding-pipeline-results-sender)
 - [Modules](#modules)
 - [Building from Source](#building-from-source)
@@ -49,7 +50,8 @@ Optional<Response> response = Interceptor.interceptor()
 - **Four verdict types** — `BLOCK`, `PROCEED`, `CHALLENGE`, and `DEFER` cover the full spectrum of fraud responses.
 - **Type-safe result handling** — fluent `onBlock` / `onProceed` / `onChallenge` / `onDefer` handlers return a typed `Optional<R>`; only the matching handler fires. Each verdict also has a `Runnable` overload for side-effect-only handling (logging, metrics, events) with no return value.
 - **Audit metadata** — attach structured `DecisionDetail` to any verdict for logging and compliance.
-- **Pipeline forwarding** — register a `Sender` to dispatch the full pipeline context — verdict, result, and all detection signals — to audit logs, message queues, or monitoring systems in one call.
+- **Instrument identification** — model the subject of a pipeline run as an `InstrumentType` (credit card, IP address, device) and attach it to a `InstrumentIdentifier` that bundles tenant, user, and instrument into one typed value.
+- **Pipeline forwarding** — register a `Sender` to dispatch the full pipeline context — verdict, result, detections, instrument identifier, and arbitrary metadata — to audit logs, message queues, or monitoring systems in one call. Conditional variants (`sendOnBlock`, `sendUnlessProceed`, etc.) target specific verdicts.
 - **Zero framework coupling** — plain Java 25 with no mandatory runtime dependencies beyond Jakarta Annotations.
 
 ---
@@ -112,7 +114,7 @@ dependencies {
 
 ## Core Concepts
 
-The library is built around six types that work together in a linear pipeline.
+The library is built around eight types that work together in a linear pipeline.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -122,7 +124,7 @@ The library is built around six types that work together in a linear pipeline.
 │  detect(target, Detector) ──► Detected  ─┐                  │
 │  detect(target, Detector) ──► Detected   │                  │
 │                                          ▼                  │
-│                               Decider(List<Detected>)        │
+│                               Decider(List<Detected>)       │
 │                                          │                  │
 │                                          ▼                  │
 │                                       Decided               │
@@ -144,7 +146,9 @@ The library is built around six types that work together in a linear pipeline.
 | `Detected<T>` | The output of one detector — either a `DetectedScore` or a `DetectedStatus` |
 | `Decider` | Examines all `Detected` results and returns a `Decided` verdict |
 | `Decision<R>` | Maps each verdict type to a caller-supplied `Supplier<R>` or `Runnable` handler and returns the result |
-| `Sender<R>` | Receives the complete pipeline context — result, verdict, and all detections — for forwarding to external systems |
+| `Sender<R>` | Receives the complete pipeline context — result, verdict, detections, identifier, and metadata — for forwarding to external systems |
+| `InstrumentType` | Marker interface for the domain object being evaluated (credit card, IP address, device fingerprint, etc.) |
+| `InstrumentIdentifier<T>` | Bundles tenant (`accountId`), owner (`userId`), and the typed instrument into one value that can be attached to a `Sender` call |
 
 ### Detection result types
 
@@ -271,7 +275,7 @@ Optional<ApiResponse> response = Interceptor.interceptor()
     .detect(request.getDeviceId(),  new DeviceBlocklistDetector(blocklist))
     .decide(new TieredScoreDecider())
     .onBlock(()     -> ApiResponse.forbidden("Request blocked"))
-    .onChallenge(() -> ApiResponse.challenge("Complete verification to continue"))
+    .onChallenge(() -> ApiResponse.status(401).header("WWW-Authenticate", "OTP").body("Complete verification to continue"))
     .onDefer(()     -> ApiResponse.accepted("Your request is under review"))
     .onProceed(()   -> orderService.submit(request))
     .result();
@@ -364,15 +368,54 @@ Access it in an outcome handler:
 
 ---
 
-### Forwarding Pipeline Results (Sender)
+### Instrument Types
 
-After all outcome handlers have been registered, call `.send()` to dispatch the complete pipeline context — the handler result, the verdict, and every detection signal — to an external system in a single step. `Sender<R>` is a `@FunctionalInterface`, so it can be supplied as a lambda.
+`InstrumentType` is a marker interface for the domain object being evaluated — a credit card, an IP address, a device fingerprint, or any other subject. `InstrumentIdentifier<T>` wraps it together with the tenant and user context.
+
+**Define your instrument**
 
 ```java
-Sender<ApiResponse> auditSender = (result, decided, detections) ->
+public record CreditCard(String number, String holder) implements InstrumentType {
+    public String type() { return "credit-card"; }
+}
+```
+
+**Define your identifier**
+
+```java
+public record PaymentIdentifier(String accountId, String userId, CreditCard instrument)
+        implements InstrumentIdentifier<CreditCard> {}
+```
+
+**Use it in the pipeline**
+
+The identifier is passed to `.send()` overloads so senders receive full tenant and instrument context alongside the verdict. The identifier is supplied lazily so it is only evaluated when the send condition is met.
+
+```java
+var identifier = new PaymentIdentifier("acct-42", "user-99", card);
+
+Interceptor.interceptor()
+    .detect(card, fraudDetector)
+    .decide(decider)
+    .onBlock(()   -> ApiResponse.forbidden("Card blocked"))
+    .onProceed(() -> paymentService.charge(card))
+    .send(auditSender, () -> identifier)       // forwarded to all senders
+    .sendOnBlock(alertSender, () -> identifier, Map.of("reason", "fraud"))
+    .result();
+```
+
+---
+
+### Forwarding Pipeline Results (Sender)
+
+After all outcome handlers have been registered, call `.send()` to dispatch the complete pipeline context — the handler result, the verdict, every detection signal, the instrument identifier, and any caller-supplied metadata — to an external system in a single step. `Sender<R>` is a `@FunctionalInterface`, so it can be supplied as a lambda.
+
+```java
+Sender<ApiResponse> auditSender = (result, decided, detections, identifier, metadata) ->
     auditLog.record(AuditEntry.builder()
         .verdict(decided.type())
         .detections(detections)
+        .accountId(identifier != null ? identifier.accountId() : null)
         .response(result)
         .build());
 ```
@@ -385,15 +428,51 @@ Optional<ApiResponse> response = Interceptor.interceptor()
     .detect(request.getDeviceId(),  deviceDetector)
     .decide(decider)
     .onBlock(()     -> ApiResponse.forbidden("Request blocked"))
-    .onChallenge(() -> ApiResponse.challenge("Verification required"))
+    .onChallenge(() -> ApiResponse.status(401).header("WWW-Authenticate", "OTP").body("Verification required"))
     .onProceed(()   -> orderService.submit(request))
-    .send(auditSender)   // receives result + verdict + all detections
+    .send(auditSender)   // fires unconditionally; receives result + verdict + detections
     .result();
 ```
 
-`send()` is called regardless of which verdict fired, making it the right place for unconditional audit logging, metrics emission, or event publishing. The `result` parameter passed to the `Sender` is the value set by the matching handler, or `null` if a `Runnable` handler was used or no handler was registered.
+`send()` fires regardless of which verdict matched, making it the right place for unconditional audit logging, metrics, or event publishing. The `result` parameter is the value set by the matching handler, or `null` if a `Runnable` handler was used or no handler was registered.
 
-You can register multiple senders by chaining `.send()` calls:
+#### Enriching the sender with identifier and metadata
+
+Every `.send()` variant accepts an optional `InstrumentIdentifier` supplier and/or a `Map<String, Object>` metadata map. The identifier supplier is evaluated lazily — only when the send condition is met.
+
+```java
+var identifier = new PaymentIdentifier("acct-42", "user-99", card);
+var meta       = Map.<String, Object>of("traceId", requestId, "channel", "web");
+
+.send(auditSender, () -> identifier)            // identifier only
+.send(metricsSender, meta)                      // metadata only
+.send(eventBusSender, () -> identifier, meta)   // both
+.result();
+```
+
+#### Conditional send variants
+
+Use the conditional variants to target a specific verdict or exclude one:
+
+| Method | Fires when |
+|---|---|
+| `sendOnBlock(sender)` | verdict is `BLOCK` |
+| `sendOnProceed(sender)` | verdict is `PROCEED` |
+| `sendOnChallenge(sender)` | verdict is `CHALLENGE` |
+| `sendOnDefer(sender)` | verdict is `DEFER` |
+| `sendUnlessBlocked(sender)` | verdict is **not** `BLOCK` |
+| `sendUnlessProceed(sender)` | verdict is **not** `PROCEED` |
+| `sendUnlessDefer(sender)` | verdict is **not** `DEFER` |
+
+All variants accept the same `(sender)`, `(sender, identifier)`, `(sender, metadata)`, and `(sender, identifier, metadata)` overloads shown above.
+
+```java
+.sendOnBlock(fraudAlertSender, () -> identifier, Map.of("reason", "high-risk"))
+.sendUnlessProceed(anomalySender, () -> identifier)
+.result();
+```
+
+You can register multiple senders by chaining calls:
 
 ```java
 .send(auditSender)

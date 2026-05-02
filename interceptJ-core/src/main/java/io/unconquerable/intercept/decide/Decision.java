@@ -1,10 +1,13 @@
 package io.unconquerable.intercept.decide;
 
 import io.unconquerable.intercept.detect.Detected;
+import io.unconquerable.intercept.instrument.InstrumentIdentifier;
+import io.unconquerable.intercept.instrument.InstrumentType;
 import io.unconquerable.intercept.send.Sender;
 import jakarta.annotation.Nonnull;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -259,7 +262,61 @@ public class Decision<R> {
      * @see #sendOnDefer(Sender)
      */
     public Decision<R> send(Sender<R> sender) {
-        sender.send(result, decided, detections);
+        sender.send(result, decided, detections, null, null);
+        return this;
+    }
+
+    /**
+     * Dispatches the complete pipeline context to the given {@link Sender}, unconditionally,
+     * enriched with the instrument identifier that scoped the pipeline execution.
+     *
+     * <p>The {@code identifier} supplier is evaluated lazily at call time. Use this overload when
+     * the instrument context (tenant, user, and instrument data) should be forwarded to the sender
+     * alongside the verdict and detections.
+     *
+     * @param sender     the recipient that will process the pipeline outcome; must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> send(Sender<R> sender,
+                            Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier) {
+        sender.send(result, decided, detections, identifier.get(), null);
+        return this;
+    }
+
+    /**
+     * Dispatches the complete pipeline context to the given {@link Sender}, unconditionally,
+     * enriched with caller-supplied metadata.
+     *
+     * <p>Use this overload to attach arbitrary key-value pairs — such as request headers, trace
+     * IDs, or feature flags — that the sender can use for routing or enrichment.
+     *
+     * @param sender   the recipient that will process the pipeline outcome; must not be {@code null}
+     * @param metaData arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> send(Sender<R> sender,
+                            Map<String, Object> metaData) {
+        sender.send(result, decided, detections, null, metaData);
+        return this;
+    }
+
+    /**
+     * Dispatches the complete pipeline context to the given {@link Sender}, unconditionally,
+     * enriched with both the instrument identifier and caller-supplied metadata.
+     *
+     * <p>This is the full-context overload. Use it when the sender requires both the instrument
+     * identifier (for tenant/user scoping) and additional metadata (for routing or enrichment).
+     *
+     * @param sender     the recipient that will process the pipeline outcome; must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @param metaData   arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> send(Sender<R> sender,
+                            Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier,
+                            Map<String, Object> metaData) {
+        sender.send(result, decided, detections, identifier.get(), metaData);
         return this;
     }
 
@@ -276,7 +333,60 @@ public class Decision<R> {
      */
     public Decision<R> sendOnBlock(Sender<R> sender) {
         if (decided.toBlock()) {
-            sender.send(result, decided, detections);
+            sender.send(result, decided, detections, null, null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#BLOCK}, enriched with the instrument identifier.
+     *
+     * @param sender     the recipient that will process the pipeline outcome on a block verdict;
+     *                   must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnBlock(Sender<R> sender,
+                                   Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier) {
+        if (decided.toBlock()) {
+            sender.send(result, decided, detections, identifier.get(), null);
+        }
+
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#BLOCK}, enriched with caller-supplied metadata.
+     *
+     * @param sender   the recipient that will process the pipeline outcome on a block verdict;
+     *                 must not be {@code null}
+     * @param metaData arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnBlock(Sender<R> sender, Map<String, Object> metaData) {
+        if (decided.toBlock()) {
+            sender.send(result, decided, detections, null, metaData);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#BLOCK}, enriched with both the instrument identifier and metadata.
+     *
+     * @param sender     the recipient that will process the pipeline outcome on a block verdict;
+     *                   must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @param metaData   arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnBlock(Sender<R> sender,
+                                   Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier,
+                                   Map<String, Object> metaData) {
+        if (decided.toBlock()) {
+            sender.send(result, decided, detections, identifier.get(), metaData);
         }
         return this;
     }
@@ -294,7 +404,59 @@ public class Decision<R> {
      */
     public Decision<R> sendOnProceed(Sender<R> sender) {
         if (decided.toProceed()) {
-            sender.send(result, decided, detections);
+            sender.send(result, decided, detections, null, null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#PROCEED}, enriched with the instrument identifier.
+     *
+     * @param sender     the recipient that will process the pipeline outcome on a proceed verdict;
+     *                   must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnProceed(Sender<R> sender,
+                                     Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier) {
+        if (decided.toProceed()) {
+            sender.send(result, decided, detections, identifier.get(), null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#PROCEED}, enriched with caller-supplied metadata.
+     *
+     * @param sender   the recipient that will process the pipeline outcome on a proceed verdict;
+     *                 must not be {@code null}
+     * @param metaData arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnProceed(Sender<R> sender, Map<String, Object> metaData) {
+        if (decided.toProceed()) {
+            sender.send(result, decided, detections, null, metaData);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#PROCEED}, enriched with both the instrument identifier and metadata.
+     *
+     * @param sender     the recipient that will process the pipeline outcome on a proceed verdict;
+     *                   must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @param metaData   arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnProceed(Sender<R> sender,
+                                     Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier,
+                                     Map<String, Object> metaData) {
+        if (decided.toProceed()) {
+            sender.send(result, decided, detections, identifier.get(), metaData);
         }
         return this;
     }
@@ -312,7 +474,60 @@ public class Decision<R> {
      */
     public Decision<R> sendOnChallenge(Sender<R> sender) {
         if (decided.toChallenge()) {
-            sender.send(result, decided, detections);
+            sender.send(result, decided, detections, null, null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#CHALLENGE}, enriched with the instrument identifier.
+     *
+     * @param sender     the recipient that will process the pipeline outcome on a challenge verdict;
+     *                   must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnChallenge(Sender<R> sender,
+                                       Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier) {
+        if (decided.toChallenge()) {
+            sender.send(result, decided, detections, identifier.get(), null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#CHALLENGE}, enriched with caller-supplied metadata.
+     *
+     * @param sender   the recipient that will process the pipeline outcome on a challenge verdict;
+     *                 must not be {@code null}
+     * @param metaData arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnChallenge(Sender<R> sender,
+                                       Map<String, Object> metaData) {
+        if (decided.toChallenge()) {
+            sender.send(result, decided, detections, null, metaData);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#CHALLENGE}, enriched with both the instrument identifier and metadata.
+     *
+     * @param sender     the recipient that will process the pipeline outcome on a challenge verdict;
+     *                   must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @param metaData   arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnChallenge(Sender<R> sender,
+                                       Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier,
+                                       Map<String, Object> metaData) {
+        if (decided.toChallenge()) {
+            sender.send(result, decided, detections, identifier.get(), metaData);
         }
         return this;
     }
@@ -330,7 +545,59 @@ public class Decision<R> {
      */
     public Decision<R> sendOnDefer(Sender<R> sender) {
         if (decided.toDefer()) {
-            sender.send(result, decided, detections);
+            sender.send(result, decided, detections, null, null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#DEFER}, enriched with the instrument identifier.
+     *
+     * @param sender     the recipient that will process the pipeline outcome on a defer verdict;
+     *                   must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnDefer(Sender<R> sender,
+                                   Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier) {
+        if (decided.toDefer()) {
+            sender.send(result, decided, detections, identifier.get(), null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#DEFER}, enriched with caller-supplied metadata.
+     *
+     * @param sender   the recipient that will process the pipeline outcome on a defer verdict;
+     *                 must not be {@code null}
+     * @param metaData arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnDefer(Sender<R> sender, Map<String, Object> metaData) {
+        if (decided.toDefer()) {
+            sender.send(result, decided, detections, null, metaData);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} only when the verdict is
+     * {@link Decided.Type#DEFER}, enriched with both the instrument identifier and metadata.
+     *
+     * @param sender     the recipient that will process the pipeline outcome on a defer verdict;
+     *                   must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @param metaData   arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendOnDefer(Sender<R> sender,
+                                   Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier,
+                                   Map<String, Object> metaData) {
+        if (decided.toDefer()) {
+            sender.send(result, decided, detections, identifier.get(), metaData);
         }
         return this;
     }
@@ -348,7 +615,61 @@ public class Decision<R> {
      */
     public Decision<R> sendUnlessBlocked(Sender<R> sender) {
         if (!decided.toBlock()) {
-            sender.send(result, decided, detections);
+            sender.send(result, decided, detections, null, null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} for every verdict
+     * <em>except</em> {@link Decided.Type#BLOCK}, enriched with the instrument identifier.
+     *
+     * @param sender     the recipient that will process the pipeline outcome unless the verdict is
+     *                   BLOCK; must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendUnlessBlocked(Sender<R> sender,
+                                         Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier) {
+        if (!decided.toBlock()) {
+            sender.send(result, decided, detections, identifier.get(), null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} for every verdict
+     * <em>except</em> {@link Decided.Type#BLOCK}, enriched with caller-supplied metadata.
+     *
+     * @param sender   the recipient that will process the pipeline outcome unless the verdict is
+     *                 BLOCK; must not be {@code null}
+     * @param metaData arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendUnlessBlocked(Sender<R> sender,
+                                         Map<String, Object> metaData) {
+        if (!decided.toBlock()) {
+            sender.send(result, decided, detections, null, metaData);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} for every verdict
+     * <em>except</em> {@link Decided.Type#BLOCK}, enriched with both the instrument identifier
+     * and metadata.
+     *
+     * @param sender     the recipient that will process the pipeline outcome unless the verdict is
+     *                   BLOCK; must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @param metaData   arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendUnlessBlocked(Sender<R> sender,
+                                         Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier,
+                                         Map<String, Object> metaData) {
+        if (!decided.toBlock()) {
+            sender.send(result, decided, detections, identifier.get(), metaData);
         }
         return this;
     }
@@ -366,7 +687,60 @@ public class Decision<R> {
      */
     public Decision<R> sendUnlessProceed(Sender<R> sender) {
         if (!decided.toProceed()) {
-            sender.send(result, decided, detections);
+            sender.send(result, decided, detections, null, null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} for every verdict
+     * <em>except</em> {@link Decided.Type#PROCEED}, enriched with the instrument identifier.
+     *
+     * @param sender     the recipient that will process the pipeline outcome unless the verdict is
+     *                   PROCEED; must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendUnlessProceed(Sender<R> sender,
+                                         Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier) {
+        if (!decided.toProceed()) {
+            sender.send(result, decided, detections, identifier.get(), null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} for every verdict
+     * <em>except</em> {@link Decided.Type#PROCEED}, enriched with caller-supplied metadata.
+     *
+     * @param sender   the recipient that will process the pipeline outcome unless the verdict is
+     *                 PROCEED; must not be {@code null}
+     * @param metaData arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendUnlessProceed(Sender<R> sender, Map<String, Object> metaData) {
+        if (!decided.toProceed()) {
+            sender.send(result, decided, detections, null, metaData);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} for every verdict
+     * <em>except</em> {@link Decided.Type#PROCEED}, enriched with both the instrument identifier
+     * and metadata.
+     *
+     * @param sender     the recipient that will process the pipeline outcome unless the verdict is
+     *                   PROCEED; must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @param metaData   arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendUnlessProceed(Sender<R> sender,
+                                         Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier,
+                                         Map<String, Object> metaData) {
+        if (!decided.toProceed()) {
+            sender.send(result, decided, detections, identifier.get(), metaData);
         }
         return this;
     }
@@ -384,10 +758,64 @@ public class Decision<R> {
      */
     public Decision<R> sendUnlessDefer(Sender<R> sender) {
         if (!decided.toDefer()) {
-            sender.send(result, decided, detections);
+            sender.send(result, decided, detections, null, null);
         }
         return this;
     }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} for every verdict
+     * <em>except</em> {@link Decided.Type#DEFER}, enriched with the instrument identifier.
+     *
+     * @param sender     the recipient that will process the pipeline outcome unless the verdict is
+     *                   DEFER; must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendUnlessDefer(Sender<R> sender,
+                                       Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier) {
+        if (!decided.toDefer()) {
+            sender.send(result, decided, detections, identifier.get(), null);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} for every verdict
+     * <em>except</em> {@link Decided.Type#DEFER}, enriched with caller-supplied metadata.
+     *
+     * @param sender   the recipient that will process the pipeline outcome unless the verdict is
+     *                 DEFER; must not be {@code null}
+     * @param metaData arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendUnlessDefer(Sender<R> sender, Map<String, Object> metaData) {
+        if (!decided.toDefer()) {
+            sender.send(result, decided, detections, null, metaData);
+        }
+        return this;
+    }
+
+    /**
+     * Dispatches the pipeline context to the given {@link Sender} for every verdict
+     * <em>except</em> {@link Decided.Type#DEFER}, enriched with both the instrument identifier
+     * and metadata.
+     *
+     * @param sender     the recipient that will process the pipeline outcome unless the verdict is
+     *                   DEFER; must not be {@code null}
+     * @param identifier supplier of the {@link InstrumentIdentifier} to attach; must not be {@code null}
+     * @param metaData   arbitrary key-value pairs to forward to the sender; must not be {@code null}
+     * @return this {@code Decision} for fluent chaining
+     */
+    public Decision<R> sendUnlessDefer(Sender<R> sender,
+                                       Supplier<? extends InstrumentIdentifier<? extends InstrumentType>> identifier,
+                                       Map<String, Object> metaData) {
+        if (!decided.toDefer()) {
+            sender.send(result, decided, detections, identifier.get(), metaData);
+        }
+        return this;
+    }
+
 
     /**
      * Returns the result produced by the matching outcome handler, if any.

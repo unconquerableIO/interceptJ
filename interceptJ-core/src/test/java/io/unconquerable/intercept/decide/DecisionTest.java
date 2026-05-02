@@ -1,11 +1,14 @@
 package io.unconquerable.intercept.decide;
 
 import io.unconquerable.intercept.detect.DetectedStatus;
+import io.unconquerable.intercept.instrument.InstrumentIdentifier;
+import io.unconquerable.intercept.instrument.InstrumentType;
 import io.unconquerable.intercept.send.Sender;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static io.unconquerable.intercept.decide.Decided.*;
@@ -217,8 +220,6 @@ class DecisionTest {
 
         @Test
         void runnable_and_supplier_overloads_can_be_mixed_on_different_verdicts() {
-            // BLOCK fires the runnable (side effect); result comes from onProceed supplier
-            // but since verdict is BLOCK, onProceed supplier does not fire
             boolean[] ran = {false};
             var result = new Decision<String>(decidedToBlock())
                     .onBlock(() -> ran[0] = true)
@@ -244,17 +245,22 @@ class DecisionTest {
     @Nested
     class SenderDispatching {
 
-        // Helper: a Sender that records the calls it receives
-        private record Capture<R>(boolean[] fired, Object[] result, Decided[] decided) {
+        // Captures all five arguments forwarded by a Sender call
+        private record Capture<R>(boolean[] fired, Object[] result, Decided[] decided,
+                                  Object[] identifier, Map<?, ?>[] metadata) {
+
             static <R> Capture<R> empty() {
-                return new Capture<>(new boolean[]{false}, new Object[]{null}, new Decided[]{null});
+                return new Capture<>(new boolean[]{false}, new Object[]{null},
+                        new Decided[]{null}, new Object[]{null}, new Map[]{null});
             }
 
             Sender<R> sender() {
-                return (result, decided, detections) -> {
+                return (result, decided, detections, id, meta) -> {
                     fired[0] = true;
                     this.result[0] = result;
                     this.decided[0] = decided;
+                    this.identifier[0] = id;
+                    this.metadata[0] = meta;
                 };
             }
         }
@@ -304,7 +310,7 @@ class DecisionTest {
             boolean[] received = {false};
 
             new Decision<String>(decidedToProceed(), detections)
-                    .send((result, decided, d) -> received[0] = d.contains(detection))
+                    .send((result, decided, d, id, meta) -> received[0] = d.contains(detection))
                     .result();
 
             assertTrue(received[0]);
@@ -316,8 +322,8 @@ class DecisionTest {
             boolean[] second = {false};
 
             new Decision<String>(decidedToBlock())
-                    .send((r, d, det) -> first[0]  = true)
-                    .send((r, d, det) -> second[0] = true)
+                    .send((r, d, det, id, meta) -> first[0]  = true)
+                    .send((r, d, det, id, meta) -> second[0] = true)
                     .result();
 
             assertTrue(first[0]);
@@ -327,7 +333,7 @@ class DecisionTest {
         @Test
         void send_returns_same_decision_instance() {
             var decision = new Decision<String>(decidedToBlock());
-            assertSame(decision, decision.send((r, d, det) -> {}));
+            assertSame(decision, decision.send((r, d, det, id, meta) -> {}));
         }
 
         // --- sendOnBlock ---
@@ -454,6 +460,333 @@ class DecisionTest {
             var capture = Capture.<String>empty();
             new Decision<String>(decidedToDefer()).sendUnlessDefer(capture.sender()).result();
             assertFalse(capture.fired[0]);
+        }
+    }
+
+    // =========================================================================
+
+    @Nested
+    class SenderWithContext {
+
+        record TestInstrument(String type) implements InstrumentType {}
+        record TestIdentifier(String accountId, String userId, TestInstrument instrument)
+                implements InstrumentIdentifier<TestInstrument> {}
+
+        private static final TestIdentifier ID  = new TestIdentifier("acct-1", "user-1", new TestInstrument("test"));
+        private static final Map<String, Object> META = Map.of("traceId", "abc-123");
+
+        // Captures identifier and metadata forwarded by the sender
+        private record ContextCapture(Object[] identifier, Map<?, ?>[] metadata) {
+            static ContextCapture empty() {
+                return new ContextCapture(new Object[]{null}, new Map[]{null});
+            }
+
+            <R> Sender<R> sender() {
+                return (result, decided, detections, id, meta) -> {
+                    identifier[0] = id;
+                    metadata[0]   = meta;
+                };
+            }
+        }
+
+        // ---- send overloads ----
+
+        @Test
+        void send_with_identifier_forwards_identifier_and_null_metadata() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).send(ctx.sender(), () -> ID).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        @Test
+        void send_with_metadata_forwards_metadata_and_null_identifier() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).send(ctx.sender(), META).result();
+            assertNull(ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void send_with_identifier_and_metadata_forwards_both() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).send(ctx.sender(), () -> ID, META).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        // ---- sendOnBlock overloads ----
+
+        @Test
+        void sendOnBlock_with_identifier_forwards_context_on_block_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendOnBlock(ctx.sender(), () -> ID).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnBlock_with_identifier_does_not_evaluate_supplier_on_non_block_verdict() {
+            boolean[] evaluated = {false};
+            new Decision<String>(decidedToProceed())
+                    .sendOnBlock((r, d, det, id, meta) -> {}, () -> { evaluated[0] = true; return ID; })
+                    .result();
+            assertFalse(evaluated[0], "identifier supplier should not be called when verdict is not BLOCK");
+        }
+
+        @Test
+        void sendOnBlock_with_metadata_forwards_context_on_block_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendOnBlock(ctx.sender(), META).result();
+            assertNull(ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnBlock_with_identifier_and_metadata_forwards_both_on_block_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendOnBlock(ctx.sender(), () -> ID, META).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnBlock_with_context_does_not_fire_for_non_block_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToProceed()).sendOnBlock(ctx.sender(), () -> ID, META).result();
+            assertNull(ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        // ---- sendOnProceed overloads ----
+
+        @Test
+        void sendOnProceed_with_identifier_forwards_context_on_proceed_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToProceed()).sendOnProceed(ctx.sender(), () -> ID).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnProceed_with_identifier_does_not_evaluate_supplier_on_non_proceed_verdict() {
+            boolean[] evaluated = {false};
+            new Decision<String>(decidedToBlock())
+                    .sendOnProceed((r, d, det, id, meta) -> {}, () -> { evaluated[0] = true; return ID; })
+                    .result();
+            assertFalse(evaluated[0], "identifier supplier should not be called when verdict is not PROCEED");
+        }
+
+        @Test
+        void sendOnProceed_with_metadata_forwards_context_on_proceed_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToProceed()).sendOnProceed(ctx.sender(), META).result();
+            assertNull(ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnProceed_with_identifier_and_metadata_forwards_both_on_proceed_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToProceed()).sendOnProceed(ctx.sender(), () -> ID, META).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnProceed_with_context_does_not_fire_for_non_proceed_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendOnProceed(ctx.sender(), () -> ID, META).result();
+            assertNull(ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        // ---- sendOnChallenge overloads ----
+
+        @Test
+        void sendOnChallenge_with_identifier_forwards_context_on_challenge_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToChallenge()).sendOnChallenge(ctx.sender(), () -> ID).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnChallenge_with_identifier_does_not_evaluate_supplier_on_non_challenge_verdict() {
+            boolean[] evaluated = {false};
+            new Decision<String>(decidedToBlock())
+                    .sendOnChallenge((r, d, det, id, meta) -> {}, () -> { evaluated[0] = true; return ID; })
+                    .result();
+            assertFalse(evaluated[0], "identifier supplier should not be called when verdict is not CHALLENGE");
+        }
+
+        @Test
+        void sendOnChallenge_with_metadata_forwards_context_on_challenge_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToChallenge()).sendOnChallenge(ctx.sender(), META).result();
+            assertNull(ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnChallenge_with_identifier_and_metadata_forwards_both_on_challenge_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToChallenge()).sendOnChallenge(ctx.sender(), () -> ID, META).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnChallenge_with_context_does_not_fire_for_non_challenge_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendOnChallenge(ctx.sender(), () -> ID, META).result();
+            assertNull(ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        // ---- sendOnDefer overloads ----
+
+        @Test
+        void sendOnDefer_with_identifier_forwards_context_on_defer_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToDefer()).sendOnDefer(ctx.sender(), () -> ID).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnDefer_with_identifier_does_not_evaluate_supplier_on_non_defer_verdict() {
+            boolean[] evaluated = {false};
+            new Decision<String>(decidedToBlock())
+                    .sendOnDefer((r, d, det, id, meta) -> {}, () -> { evaluated[0] = true; return ID; })
+                    .result();
+            assertFalse(evaluated[0], "identifier supplier should not be called when verdict is not DEFER");
+        }
+
+        @Test
+        void sendOnDefer_with_metadata_forwards_context_on_defer_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToDefer()).sendOnDefer(ctx.sender(), META).result();
+            assertNull(ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnDefer_with_identifier_and_metadata_forwards_both_on_defer_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToDefer()).sendOnDefer(ctx.sender(), () -> ID, META).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendOnDefer_with_context_does_not_fire_for_non_defer_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendOnDefer(ctx.sender(), () -> ID, META).result();
+            assertNull(ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        // ---- sendUnlessBlocked overloads ----
+
+        @Test
+        void sendUnlessBlocked_with_identifier_forwards_context_on_non_block_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToProceed()).sendUnlessBlocked(ctx.sender(), () -> ID).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        @Test
+        void sendUnlessBlocked_with_metadata_forwards_context_on_non_block_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToProceed()).sendUnlessBlocked(ctx.sender(), META).result();
+            assertNull(ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendUnlessBlocked_with_identifier_and_metadata_forwards_both_on_non_block_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToProceed()).sendUnlessBlocked(ctx.sender(), () -> ID, META).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendUnlessBlocked_with_context_does_not_fire_for_block_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendUnlessBlocked(ctx.sender(), () -> ID, META).result();
+            assertNull(ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        // ---- sendUnlessProceed overloads ----
+
+        @Test
+        void sendUnlessProceed_with_identifier_forwards_context_on_non_proceed_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendUnlessProceed(ctx.sender(), () -> ID).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        @Test
+        void sendUnlessProceed_with_metadata_forwards_context_on_non_proceed_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendUnlessProceed(ctx.sender(), META).result();
+            assertNull(ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendUnlessProceed_with_identifier_and_metadata_forwards_both_on_non_proceed_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendUnlessProceed(ctx.sender(), () -> ID, META).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendUnlessProceed_with_context_does_not_fire_for_proceed_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToProceed()).sendUnlessProceed(ctx.sender(), () -> ID, META).result();
+            assertNull(ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        // ---- sendUnlessDefer overloads ----
+
+        @Test
+        void sendUnlessDefer_with_identifier_forwards_context_on_non_defer_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendUnlessDefer(ctx.sender(), () -> ID).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
+        }
+
+        @Test
+        void sendUnlessDefer_with_metadata_forwards_context_on_non_defer_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendUnlessDefer(ctx.sender(), META).result();
+            assertNull(ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendUnlessDefer_with_identifier_and_metadata_forwards_both_on_non_defer_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToBlock()).sendUnlessDefer(ctx.sender(), () -> ID, META).result();
+            assertSame(ID, ctx.identifier[0]);
+            assertSame(META, ctx.metadata[0]);
+        }
+
+        @Test
+        void sendUnlessDefer_with_context_does_not_fire_for_defer_verdict() {
+            var ctx = ContextCapture.empty();
+            new Decision<String>(decidedToDefer()).sendUnlessDefer(ctx.sender(), () -> ID, META).result();
+            assertNull(ctx.identifier[0]);
+            assertNull(ctx.metadata[0]);
         }
     }
 
