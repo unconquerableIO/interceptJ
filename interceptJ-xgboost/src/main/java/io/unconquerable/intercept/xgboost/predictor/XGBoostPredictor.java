@@ -1,10 +1,13 @@
 package io.unconquerable.intercept.xgboost.predictor;
 
+import io.unconquerable.intercept.functional.Either;
 import io.unconquerable.intercept.xgboost.model.ModelLoader;
+import io.unconquerable.intercept.xgboost.prediction.Error;
+import io.unconquerable.intercept.xgboost.prediction.Prediction;
+import io.unconquerable.intercept.xgboost.prediction.PredictionError;
 import io.unconquerable.intercept.xgboost.prediction.RawPrediction;
 import ml.dmlc.xgboost4j.java.Booster;
 import ml.dmlc.xgboost4j.java.DMatrix;
-import ml.dmlc.xgboost4j.java.XGBoostError;
 
 public class XGBoostPredictor {
 
@@ -14,11 +17,11 @@ public class XGBoostPredictor {
         this.booster = loader.load();
     }
 
-    public RawPrediction predict(DMatrix matrix)  {
+    public Either<? extends Prediction<?>, Error> predict(DMatrix matrix) {
         try {
-            return new RawPrediction(booster.predict(matrix));
-        } catch (XGBoostError e) {
-            throw new RuntimeException(e);
+            return Either.left(new RawPrediction(booster.predict(matrix)));
+        } catch (Exception e) {
+            return Either.right(PredictionError.of(e));
         }
     }
 
